@@ -1,0 +1,33 @@
+sequenceDiagram
+    participant User
+    participant Parser as parser.py
+    participant MathEng as math_engine.py
+    participant Analyser as analyser.py
+    participant BankMgr as bankroll_mgr.py
+    participant ParlayCons as parlay_builder.py
+    participant Output as output_generator.py
+    participant Log as bet_log_template.csv
+
+    User->>Parser: "Man City 1.85"
+    Parser->>Parser: Normalize odds to decimal
+    Parser->>MathEng: implied_prob = 1/1.85
+    MathEng-->>Parser: 0.541 (54.1%)
+    Parser->>Analyser: { match, odds: 1.85, prob: 0.541 }
+    Analyser->>MathEng: ev = (prob * odds) - 1
+    MathEng-->>Analyser: 0.024 (2.4%)
+
+    alt EV >= 2%
+        Analyser->>BankMgr: Valid bet, calculate stake
+        BankMgr->>MathEng: kelly_fraction = (bp - q) / b
+        MathEng-->>BankMgr: 0.048 (4.8%)
+        BankMgr->>BankMgr: stake_amt = bankroll * kelly_fraction
+        BankMgr-->>Analyser: ₹2,400 (with limits)
+        Analyser->>ParlayCons: Add to recommendation
+        ParlayCons->>Output: Include in singles + parlays
+        Output->>Log: Log confirmed bet
+        Output-->>User: ✓ "Man City @ 1.85 - Stake: ₹2,400"
+    else EV < 2%
+        Analyser->>Output: Reject - Insufficient EV
+        Output->>Log: Log rejection reason
+        Output-->>User: ✗ "Man City rejected (EV: 2.4% < 2% threshold)"
+    end

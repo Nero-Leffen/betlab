@@ -1,0 +1,17 @@
+graph TD
+    A["📄 parser.py<br/>(Independent)"] --> D["📊 analyser.py"]
+    B["🧮 math_engine.py<br/>(Independent)"] --> C["💰 bankroll_mgr.py"]
+    B --> D
+    D --> E["🎲 parlay_builder.py"]
+    C --> E
+    A --> F["📋 output_generator.py"]
+    D --> F
+    E --> F
+    C --> F
+
+    style A fill:#fff3e0
+    style B fill:#fff3e0
+    style C fill:#c8e6c9
+    style D fill:#b3e5fc
+    style E fill:#f8bbd0
+    style F fill:#e1bee7

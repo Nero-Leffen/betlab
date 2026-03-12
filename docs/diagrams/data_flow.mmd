@@ -1,0 +1,15 @@
+graph TD
+    A["📄 bets.txt<br/>(Input)"] -->|"Match, Odds"| B["🔧 Phase 1: Parse<br/>(parser.py)"]
+    B -->|"Decimal Odds"| C["📊 Phase 2: EV Filter<br/>(analyser.py)"]
+    C -->|"EV >= 2%"| D["💰 Phase 3: Kelly Sizing<br/>(bankroll_mgr.py)"]
+    D -->|"Stakes in ₹"| E["🎲 Phase 4: Parlay<br/>(parlay_builder.py)"]
+    E -->|"Singles + Parlays"| F["📋 Phase 5: Output<br/>(output_generator.py)"]
+    F -->|"Markdown"| G["📑 recommendations.md"]
+    F -->|"CSV"| H["📊 bet_log_template.csv"]
+    C -->|"Rejected"| I["🗑️ error_log.txt"]
+    E -->|"Correlation Fails"| I
+
+    style A fill:#e1f5ff
+    style G fill:#c8e6c9
+    style H fill:#c8e6c9
+    style I fill:#ffccbc
