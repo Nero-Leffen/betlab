@@ -1,0 +1,36 @@
+# ============================================================
+# BetLab Configuration File
+# Modify these values to adjust system behaviour.
+# DO NOT set total_inr above 500 for the experimental phase.
+# ============================================================
+
+bankroll:
+  total_inr: 500
+  unit_inr: 25
+  max_daily_stake_inr: 200
+  stop_loss_inr: 250          # Pause all activity below this threshold
+
+strategy:
+  min_ev_threshold: 0.02      # Minimum 2% edge required to qualify a bet
+  kelly_enabled: true          # Half-Kelly stake sizing enabled
+  parlay_max_legs: 4           # Max legs in a single parlay
+  parlay_pool_size: 4          # Top N bets by EV eligible for parlay pool
+  parlay_max_options: 2        # Max number of parlay combos to generate
+
+# Per-sport source accuracy defaults (win rate of your tip source)
+# Add more sports here as the system expands.
+source_accuracy:
+  football: 0.53
+  default: 0.53               # Fallback for any unrecognised sport
+
+risk:
+  stop_loss_percentage: 50    # Redundant safety: pause if bankroll drops 50%
+  losing_streak_window_days: 7
+  losing_streak_threshold: 5  # Warn & suggest unit reduction after N losses in window
+  reduced_unit_multiplier: 0.5 # Multiply unit size by this during streak warning
+
+# Confidence → Stake mapping for singles (in units)
+confidence_stake_map:
+  high: 2      # 2 units = 50 INR
+  medium: 1    # 1 unit  = 25 INR
+  low: 1       # 1 unit  = 25 INR (conservative)
