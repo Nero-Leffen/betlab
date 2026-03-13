@@ -1,14 +1,23 @@
 # ============================================================
 # BetLab Configuration File
 # Modify these values to adjust system behaviour.
-# DO NOT set total_inr above 500 for the experimental phase.
+# Current prototype bankroll baseline is 800 INR.
 # ============================================================
 
 bankroll:
-  total_inr: 500
+  total_inr: 800
   unit_inr: 25
   max_daily_stake_inr: 200
-  stop_loss_inr: 250          # Pause all activity below this threshold
+  stop_loss_inr: 400          # Pause all activity below this threshold
+
+# Bankroll policy mode
+# cold_start keeps early sessions simple until real settled history exists.
+bankroll_policy:
+  mode: cold_start
+  cold_start_min_settled_bets: 20
+  cold_start_flat_stake_inr: 25
+  cold_start_max_total_exposure_inr: 125
+  cold_start_max_parlay_options: 1
 
 strategy:
   min_ev_threshold: 0.02      # Minimum 2% edge required to qualify a bet
@@ -16,6 +25,12 @@ strategy:
   parlay_max_legs: 4           # Max legs in a single parlay
   parlay_pool_size: 4          # Top N bets by EV eligible for parlay pool
   parlay_max_options: 2        # Max number of parlay combos to generate
+  parlay_correlation:
+    enabled: true
+    min_factor: 0.85           # Final multiplier floor for hit probability
+    same_market_weight: 0.10   # Penalty when market families are the same
+    shared_token_weight: 0.10  # Penalty scaled by text-token overlap
+    shared_sport_weight: 0.00  # Optional broad same-sport penalty
 
 # Per-sport source accuracy defaults (win rate of your tip source)
 # Add more sports here as the system expands.
@@ -23,11 +38,56 @@ source_accuracy:
   football: 0.53
   default: 0.53               # Fallback for any unrecognised sport
 
+# Market-family priors (base true-probability when no calibration data is available)
+# These differ from source_accuracy: they are market-specific, not sport-specific.
+market_priors:
+  moneyline: 0.53
+  btts: 0.52
+  totals: 0.54
+  handicap: 0.51
+  freeform: 0.53
+  default: 0.53
+
+# Probability calibration from settled results
+calibration:
+  min_sample_size: 10           # Minimum completed results before blending live data
+  time_decay_halflife_days: 30  # Half-life for exponential time-decay weighting
+  smoothing_weight: 0.30        # Prior weight in blend: p = 0.30*prior + 0.70*live_rate
+
 risk:
   stop_loss_percentage: 50    # Redundant safety: pause if bankroll drops 50%
   losing_streak_window_days: 7
   losing_streak_threshold: 5  # Warn & suggest unit reduction after N losses in window
   reduced_unit_multiplier: 0.5 # Multiply unit size by this during streak warning
+
+# Session-level portfolio optimizer
+# Caps apply after Half-Kelly sizing; bets are rejected when adding them would breach a cap.
+# Set enabled: false to revert to legacy daily-cap-only behaviour.
+optimizer:
+  enabled: true
+  max_exposure_per_team_inr: 75      # Max total stake on any single team/selection
+  max_exposure_per_market_inr: 100   # Max total stake within one market family (moneyline/totals/btts/handicap)
+  max_exposure_per_confidence:        # Max total stake per confidence band
+    high: 100
+    medium: 100
+    low: 50
+  drawdown_governor:
+    enabled: true
+    tiers:
+      - drawdown_pct: 10              # ≥10% drawdown
+        unit_multiplier: 0.75
+      - drawdown_pct: 20              # ≥20% drawdown
+        unit_multiplier: 0.50
+      - drawdown_pct: 30              # ≥30% drawdown
+        unit_multiplier: 0.25
+
+# EV Robustness Quality Gates (Phase 5)
+# When enabled, labels each bet as robust/marginal/thin and gates the parlay pool.
+# thin = EV < min_ev_threshold + margin_pct; robust = calibrated with good sample.
+ev_robustness:
+  enabled: false              # Set true to activate parlay gate and thin filtering
+  margin_pct: 0.02            # EV must exceed threshold + margin to avoid 'thin' label
+  parlay_require_robust: true # Exclude thin bets from parlay pool when enabled
 
 # Confidence → Stake mapping for singles (in units)
 confidence_stake_map:
