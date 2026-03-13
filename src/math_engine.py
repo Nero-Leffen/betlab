@@ -132,12 +132,14 @@ def kelly_criterion(decimal_odds: float, true_probability: float) -> float:
 
     Returns fraction of bankroll to stake (0.0 if bet has no edge).
     """
+    if decimal_odds <= 1.0:
+        raise ValueError(f"Decimal odds must be > 1.0, got {decimal_odds}")
+    if not (0.0 < true_probability < 1.0):
+        raise ValueError(f"true_probability must be between 0 and 1, got {true_probability}")
+
     b = decimal_odds - 1.0
     p = true_probability
     q = 1.0 - p
-
-    if b <= 0:
-        return 0.0
 
     full_kelly = (b * p - q) / b
     half_kelly = full_kelly * 0.5
@@ -157,6 +159,22 @@ def parlay_hit_probability(leg_probabilities: list[float]) -> float:
     for prob in leg_probabilities:
         probability *= prob
     return round(probability, 6)
+
+
+def apply_correlation_penalty(independent_probability: float, penalty_factor: float) -> float:
+    """
+    Apply a correlation penalty factor to a parlay hit probability.
+
+    independent_probability: base probability from independent leg multiplication.
+    penalty_factor: multiplier in (0, 1].
+    """
+    if not (0.0 <= independent_probability <= 1.0):
+        raise ValueError(
+            f"independent_probability must be between 0 and 1, got {independent_probability}"
+        )
+    if not (0.0 < penalty_factor <= 1.0):
+        raise ValueError(f"penalty_factor must be in (0, 1], got {penalty_factor}")
+    return round(independent_probability * penalty_factor, 6)
 
 
 def parlay_combined_odds(leg_odds: list[float]) -> float:
@@ -189,6 +207,17 @@ def kelly_stake_inr(
       3. Round to nearest unit.
       4. Clamp between min_units and max_units.
     """
+    if bankroll_inr <= 0:
+        raise ValueError(f"bankroll_inr must be > 0, got {bankroll_inr}")
+    if unit_inr <= 0:
+        raise ValueError(f"unit_inr must be > 0, got {unit_inr}")
+    if min_units < 0:
+        raise ValueError(f"min_units must be >= 0, got {min_units}")
+    if max_units < min_units:
+        raise ValueError(
+            f"max_units must be >= min_units, got min_units={min_units}, max_units={max_units}"
+        )
+
     fraction = kelly_criterion(decimal_odds, true_probability)
     raw_inr = fraction * bankroll_inr
 

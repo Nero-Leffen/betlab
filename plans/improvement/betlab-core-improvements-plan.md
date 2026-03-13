@@ -89,11 +89,27 @@ By the end of this plan, BetLab should:
 - Recommend no bets when edges are weak or candidate set is too correlated.
 
 ## Practical Build Order (Execution Priority)
-1. Correlation-aware parlay engine.
-2. Dynamic probability calibration from results.
-3. Session-level bankroll optimizer.
-4. Market and selection dedupe plus conflict rules.
-5. EV robustness gates and uncertainty display.
+
+| # | Phase | Status | Tests Added | Notes |
+| - | ----- | ------ | ----------- | ----- |
+| 1 | Correlation-aware parlay engine | ✅ Done | 17 | `apply_correlation_penalty`, soft-penalty in `parlay_builder.py`, `math_engine.py` |
+| 2 | Dynamic probability calibration from results | ✅ Done | 17 | Market priors, time-decay blending, `prob_source` / `prob_sample_count` metadata |
+| 3 | Session-level bankroll optimizer | ✅ Done | 8 | Exposure caps (team/market/confidence), drawdown governor tiers, rejection log |
+| 4 | Market and selection dedupe plus conflict rules | ✅ Done | 18 | `normalize_market_type`, `dedupe_bets`, `filter_conflicts` wired into pipeline |
+| 5 | EV robustness gates and uncertainty display | ✅ Done | 14 | `ev_robustness_label`, `apply_robustness_gate`, `is_no_bet_day`; `ev_label` field on `SizedBet`; EV Quality line in output; config block `ev_robustness` (disabled by default) |
+| 6 | Free-form market classification fix (MVP bug) | ✅ Done | 0 | Added `_infer_market_from_selection()` to `parser.py`; freeform bets now correctly tagged BTTS/O/U/Handicap/1X2 so market-specific priors are applied |
+
+**Total tests: 135 passing** (up from 0 at project start).
+
+## Current Runtime Profile
+
+- Bankroll baseline: `₹800`
+- Stop-loss threshold: `₹400`
+- First-run policy: `cold_start`
+- Cold-start singles stake: `₹25`
+- Cold-start total singles exposure: `₹125` _(raised from 75 on 2026-03-13 to allow 4-5 qualifying bets through)_
+- Cold-start adaptive unlock: after `20` completed results
+- Parlay behavior in cold-start: capped to `1` option, suppressed entirely if exposure would be exceeded
 
 ## 6-Week Implementation Map
 
@@ -218,6 +234,45 @@ Files:
 - Lightweight constrained optimization for portfolio allocation.
 
 ## Immediate Next Step
-Start with Week 2 from the practical build order if you want fastest quality gain:
-- Implement soft-correlation penalties and adjusted parlay EV first.
-- Then rerun your current Bets.txt flow and compare parlay output quality.
+All 5 phases are complete. The roadmap is fully delivered and the app is ready for a first run under the cold-start bankroll policy.
+
+**Optional next steps (not planned):**
+
+- Enable `ev_robustness.enabled: true` in `config/settings.yaml` to activate the parlay quality gate in live use.
+
+---
+
+## Session Log
+
+### 2026-03-13 — MVP First Run
+
+**Status:** First real run completed on live bets from Bets.txt (Friday–Sunday picks).
+
+**Bugs found and fixed:**
+1. **Market classification broken for free-form input** — all 31 parsed bets were tagged `freeform`, so market-specific priors (BTTS 0.52, Over/Under 0.54) were never applied. Fixed by adding `_infer_market_from_selection()` in `src/parser.py`.
+2. **Cold-start exposure cap too tight** — cap of ₹75 blocked the 4th qualifying EV-positive bet. Raised to ₹125 in `config/settings.yaml`.
+
+**Results after fix:**
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Qualifying singles | 3 | **4** |
+| Parlay options | 0 | **1** (4-leg, 21.6x combined odds) |
+| Total at risk | ₹75 | **₹125** |
+| Risk % of bankroll | 9.4% | **15.6%** |
+
+**Qualifying bets (2026-03-13):**
+
+| Bet | Market | Odds | EV |
+|-----|--------|------|----|
+| Napoli vs Lecce — Both Teams to Score | BTTS | 2.65 | +37.8% |
+| Charlotte vs Inter Miami — Miami ML | 1X2 | 2.02 | +7.1% |
+| FC Dallas vs San Diego FC — San Diego ML | 1X2 | 2.02 | +7.1% |
+| Le Havre vs Lyon — Lyon ML | 1X2 | 2.00 | +6.0% |
+
+**Key insight:** 27 of 31 picks (87%) failed EV — correct, not a bug. Most picks are short-odds favorites (1.30–1.85) with no mathematical edge at a 53% prior win rate.
+
+**Next action:** Log results once matches settle. Upload via "Update Results" tab. 20 settled bets unlocks Kelly sizing.
+- Add multi-sport support by extending `_detect_sport` in `src/parser.py` and `source_accuracy` in config.
+- Add team alias dictionary to `src/parser.py` for better entity resolution.
+- Decide whether the policy-level `10%` per-bet and `20%` open-exposure limits should become explicit hard-enforced runtime controls.

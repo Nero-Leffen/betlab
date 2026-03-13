@@ -16,16 +16,18 @@ BetLab uses **Half-Kelly Criterion** for stake sizing, not the theoretically opt
 
 The Kelly Criterion formula gives the optimal fraction of bankroll to bet:
 
-```
+```text
 f* = (b × p - q) / b
 ```
 
 Where:
+
 - `b` = odds - 1 (decimal odds minus 1)
 - `p` = probability of winning
 - `q` = 1 - p (probability of losing)
 
 For example, with odds 2.0 (50% implied) and 55% actual win probability:
+
 - Full-Kelly: f* = (1 × 0.55 - 0.45) / 1 = **0.10** (10% of bankroll)
 - Half-Kelly: 0.10 × 0.5 = **0.05** (5% of bankroll)
 
@@ -45,13 +47,13 @@ Successful professional bettors (Pinnacle, sharp bettors) routinely use fraction
 
 ### What We Didn't Do
 
-We didn't use **Full-Kelly** because the portfolio would be volatile and psychologically grueling for a learning project. We also didn't use **1/4-Kelly** because with a ₹500 bankroll and careful analysis, Half-Kelly still provides meaningful edge capture.
+We didn't use **Full-Kelly** because the portfolio would be volatile and psychologically grueling for a learning project. We also didn't use **1/4-Kelly** because with an ₹800 bankroll and careful analysis, Half-Kelly still provides meaningful edge capture once the system exits cold-start mode.
 
 ---
 
 ## 2. Why Correlation Checks in Parlays?
 
-### The Decision
+### Correlation Decision
 
 Before assembling multi-leg parlays, BetLab checks whether selected bets are *independent*. If two legs are correlated (e.g., "Man City to win" + "Man City total shots > 8"), we reject the parlay or reassess.
 
@@ -68,6 +70,7 @@ Parlay odds multiply: if you bet Man City @ 2.0 and Arsenal @ 2.0, the combined 
 ### Real-World Example
 
 Imagine:
+
 - **Leg 1:** Man City to beat Arsenal @ 2.0 (55% probability)
 - **Leg 2:** Sergio Gómez (City left-back) to score @ 10.0 (assumed 10% independent probability)
 - **Parlay odds:** 2.0 × 10.0 = 20.0
@@ -86,7 +89,7 @@ BetLab flags potential issues:
 
 We don't have true correlation matrices (that would require historical data), but we use domain knowledge to avoid obvious pitfalls.
 
-### What We Didn't Do
+### Correlation Tradeoff
 
 We didn't use **naive parlay assembly** (just multiply probabilities without checks). We also didn't implement **copula modeling** or fetch correlation from Pinnacle APIs—that's Phase 2 scope. For a learning project, heuristics suffice.
 
@@ -94,7 +97,7 @@ We didn't use **naive parlay assembly** (just multiply probabilities without che
 
 ## 3. Why Local-First Architecture?
 
-### The Decision
+### Local-First Decision
 
 BetLab stores everything locally: bets, results, odds, configuration. No cloud sync, no API calls (except Streamlit UI). Data never leaves your machine.
 
@@ -105,6 +108,7 @@ If an odds API goes down, BetLab still works. You input odds manually (or copy f
 
 **2. Privacy & Autonomy**
 Betting analytics are sensitive. Sending your bets to a cloud service means:
+
 - Your betting patterns are profiled
 - Someone could sell aggregated data to bookmakers
 - Your strategy leaks if the service is compromised
@@ -113,6 +117,7 @@ Local-first means *you* own your data. Period.
 
 **3. Simplicity for MVP**
 Building a real-time odds API integration requires:
+
 - Account setup (Pinnacle, CoinDrop, etc.)
 - API credential management
 - Rate limiting, caching, fallbacks
@@ -126,12 +131,13 @@ Every recommendation is deterministic given fixed inputs. No randomness from API
 ### Tradeoff: Manual Odds Entry
 
 The cost is manual entry. You copy odds from your bookmaker into `bets.txt`. This is:
+
 - **Slow:** ~2 minutes for 20 bets vs. 5 seconds with API
 - **Error-prone:** Typos in odds or match names
 
 But for a learning tool, this is acceptable. You engage with each bet consciously—no fire-and-forget.
 
-### What We Didn't Do
+### Local-First Tradeoff
 
 We didn't build a **live odds ingestion engine** (Phase 1 scope). We didn't integrate with Betfair, DafaBet, or Pinnacle APIs. Those are listed as Phase 2 expansion points.
 
@@ -139,9 +145,10 @@ We didn't build a **live odds ingestion engine** (Phase 1 scope). We didn't inte
 
 ## 4. Why Modular Python Architecture?
 
-### The Decision
+### Modularity Decision
 
 BetLab separates concerns into distinct modules:
+
 - `parser.py` — Input parsing
 - `math_engine.py` — Pure calculations
 - `analyser.py` — Filtering and tagging
@@ -172,6 +179,7 @@ If we discover a bug in stake sizing, it's in `bankroll_mgr.py`. If odds parsing
 
 **3. Reusability**
 The `math_engine` (odds conversion, Kelly, EV) is poker-table agnostic. We could plug it into:
+
 - A different sport (cricket, tennis, esports)
 - A different UI (CLI, API, Slack bot)
 - Different risk rules (Thorp's Criterion, growth-optimal strategies)
@@ -192,6 +200,7 @@ Reading code requires jumping between files. A monolithic script is simpler to g
 ### Live Odds API Integration
 
 **Why we didn't:** Phase 1 scope. Building real-time odds ingestion requires:
+
 - Vendor account management (Pinnacle, CoinDrop, Betfair)
 - API credential rotation, rate limiting
 - Handling sports data quirks (different naming conventions, event IDs)
@@ -206,6 +215,7 @@ This adds 500+ lines of code and infrastructure that doesn't teach us anything n
 **Why we didn't:** Our source accuracy (53%, 60%) is simple Bayesian updating from historical wins/losses. This is transparent and testable.
 
 ML models (logistic regression, gradient boosting) would predict win probability given features (odds, time-to-match, league). But they require:
+
 - 1000+ historical tips (we have ~50)
 - Feature engineering (what's predictive?)
 - Overfitting risk (memorizing noise in 50 samples)
@@ -215,6 +225,7 @@ For a portfolio project, this is premature optimization. Once we have 500+ resul
 ### Multi-Sport Support (Phase 1)
 
 **Why we didn't:** BetLab is currently football-only. Adding cricket, tennis, esports requires:
+
 - Different event structures (T20 has different dynamics than test cricket)
 - Sport-specific accuracy profiles (10% edge in football ≠ 10% edge in tennis)
 - Separate bankroll tracking or unified?
@@ -224,6 +235,7 @@ Monolithic design would handle this, but modular design makes it easier. We've s
 ### Loss-Chasing Prevention
 
 **Why we didn't add it:** BetLab has stop-loss (halt if 50% bankroll loss) and losing-streak detection (reduce stakes after 5 losses in 7 days). We didn't add aggressive loss-chasing blockers like:
+
 - "If down 20%, no bets today" (too rigid)
 - "Ban same bet type after 2 consecutive losses" (ignores EV)
 
@@ -253,7 +265,7 @@ We should have implemented a backtesting harness *before* deploying. The spec sh
 Right now, correlation checks are heuristics. We hardcode "same match → potential issue." With 50+ historical bets, we could compute actual correlation matrix. This would eliminate false positives.
 
 **3. Stakeholder Input Sooner**
-The system assumes a ₹500 bankroll and ₹200 daily cap, but we never asked: what's right for *your* bankroll? Configurable profiles (conservative, moderate, aggressive) would've surfaced this earlier.
+The system now uses an ₹800 bankroll baseline and ₹200 daily cap, but we still need to keep asking: what's right for *your* bankroll? Configurable profiles (conservative, moderate, aggressive) would surface this earlier.
 
 ### Open Questions for Phase 2
 

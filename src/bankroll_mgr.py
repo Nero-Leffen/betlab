@@ -5,9 +5,9 @@ Bankroll management logic for BetLab.
 
 Responsibilities:
   - Load current bankroll state
-  - Assign stakes using Half-Kelly (clamped to unit boundaries)
+    - Assign stakes using cold-start flat stakes or Half-Kelly sizing
   - Enforce daily cap (200 INR / 4 units)
-  - Enforce stop-loss threshold (250 INR)
+    - Enforce stop-loss threshold
   - Tiebreak by confidence when cap is hit
   - Detect losing streaks in rolling 7-day window
 """
@@ -22,7 +22,7 @@ from typing import Optional
 import pandas as pd
 import yaml
 
-from src.math_engine import kelly_stake_inr, calculate_ev, get_implied_probability
+from src.math_engine import kelly_stake_inr, kelly_criterion
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,9 @@ class BankrollConfig:
     losing_streak_window_days: int
     losing_streak_threshold: int
     reduced_unit_multiplier: float
-    confidence_stake_map: dict  # {'high': 2, 'medium': 1, 'low': 1}
+    confidence_stake_map: dict       # {'high': 2, 'medium': 1, 'low': 1}
+    optimizer_cfg: dict = field(default_factory=dict)  # Phase 3 optimizer settings
+    policy_cfg: dict = field(default_factory=dict)     # Cold-start vs adaptive policy
 
 
 @dataclass
@@ -57,6 +59,9 @@ class SizedBet:
     stake_inr: float
     tag: str = "SINGLE_CANDIDATE"      # or PARLAY_CANDIDATE (set later)
     bet_id: str = ""
+    prob_source: str = "prior"         # 'prior' | 'calibrated' | 'sport'
+    prob_sample_count: int = 0         # Effective sample weight used in calibration
+    ev_label: str = "marginal"         # 'robust' | 'marginal' | 'thin' (Phase 5)
 
 
 @dataclass
@@ -64,12 +69,15 @@ class BankrollSession:
     """Output of the bankroll manager for one analysis cycle."""
     sized_bets: list[SizedBet] = field(default_factory=list)
     total_stake_inr: float = 0.0
-    bankroll_inr: float = 500.0
+    bankroll_inr: float = 0.0
     stop_loss_triggered: bool = False
     streak_warning: bool = False
     streak_count: int = 0
     effective_unit_inr: float = 25.0
     cap_hit: bool = False
+    rejected_bets: list[dict] = field(default_factory=list)  # Phase 3: bets dropped with reasons
+    cold_start_active: bool = False
+    completed_results_count: int = 0
 
 
 def load_config(config_path: str | Path = "config/settings.yaml") -> BankrollConfig:
@@ -81,6 +89,9 @@ def load_config(config_path: str | Path = "config/settings.yaml") -> BankrollCon
     risk = cfg["risk"]
     conf_map = cfg.get("confidence_stake_map", {"high": 2, "medium": 1, "low": 1})
 
+    optimizer_cfg = cfg.get("optimizer", {}) if isinstance(cfg, dict) else {}
+    policy_cfg = cfg.get("bankroll_policy", {}) if isinstance(cfg, dict) else {}
+
     return BankrollConfig(
         total_inr=br["total_inr"],
         unit_inr=br["unit_inr"],
@@ -90,28 +101,33 @@ def load_config(config_path: str | Path = "config/settings.yaml") -> BankrollCon
         losing_streak_threshold=risk["losing_streak_threshold"],
         reduced_unit_multiplier=risk["reduced_unit_multiplier"],
         confidence_stake_map=conf_map,
+        optimizer_cfg=optimizer_cfg if isinstance(optimizer_cfg, dict) else {},
+        policy_cfg=policy_cfg if isinstance(policy_cfg, dict) else {},
     )
 
 
-def get_current_bankroll(results_path: str | Path = "data/results.csv") -> float:
+def get_current_bankroll(
+    results_path: str | Path = "data/results.csv",
+    starting_bankroll: float = 800.0,
+) -> float:
     """
     Calculate current bankroll from results history.
-    Starts at 500 INR and applies all historical P&L.
-    Returns 500.0 if no results file exists yet.
+    Starts at `starting_bankroll` and applies all historical P&L.
+    Returns `starting_bankroll` if no results file exists yet.
     """
     results_path = Path(results_path)
     if not results_path.exists():
-        return 500.0
+        return float(starting_bankroll)
 
     try:
         df = pd.read_csv(results_path)
         if "pnl_inr" not in df.columns:
-            return 500.0
+            return float(starting_bankroll)
         total_pnl = df["pnl_inr"].fillna(0).sum()
-        return round(500.0 + total_pnl, 2)
+        return round(float(starting_bankroll) + total_pnl, 2)
     except Exception as e:
         logger.warning("Could not read results.csv: %s", e)
-        return 500.0
+        return float(starting_bankroll)
 
 
 def check_losing_streak(
@@ -145,6 +161,23 @@ def check_losing_streak(
         return False, 0
 
 
+def get_completed_results_count(results_path: str | Path) -> int:
+    """Return the number of completed result rows available for policy decisions."""
+    results_path = Path(results_path)
+    if not results_path.exists():
+        return 0
+
+    try:
+        df = pd.read_csv(results_path)
+        if "result" not in df.columns:
+            return 0
+        valid_results = {"WIN", "LOSS", "VOID", "PUSH", "HALF_WIN", "HALF_LOSS"}
+        return int(df["result"].fillna("").astype(str).str.upper().isin(valid_results).sum())
+    except Exception as e:
+        logger.warning("Completed-results count failed: %s", e)
+        return 0
+
+
 def assign_stake(
     decimal_odds: float,
     true_probability: float,
@@ -170,9 +203,54 @@ def assign_stake(
         max_units=max_units,
     )
 
-    from src.math_engine import kelly_criterion
     fraction = kelly_criterion(decimal_odds, true_probability)
     return stake, fraction
+
+
+def _get_cold_start_policy_state(config: BankrollConfig, results_path: str | Path) -> tuple[bool, int, dict]:
+    """Return whether cold-start policy is active, completed result count, and policy config."""
+    policy = config.policy_cfg if isinstance(config.policy_cfg, dict) else {}
+    mode = str(policy.get("mode", "adaptive")).lower().strip()
+    completed_results = get_completed_results_count(results_path)
+    min_settled = int(policy.get("cold_start_min_settled_bets", 20))
+    active = mode == "cold_start" and completed_results < min_settled
+    return active, completed_results, policy
+
+
+def _compute_drawdown_multiplier(
+    current_bankroll: float,
+    initial_bankroll: float,
+    tiers: list[dict],
+) -> float:
+    """
+    Return the unit multiplier that applies to the current drawdown.
+
+    Tiers are checked in ascending order of drawdown_pct; the last tier
+    whose threshold is reached applies.  Returns 1.0 when no tier is hit
+    (i.e. no drawdown or bankroll above initial).
+    """
+    if initial_bankroll <= 0:
+        return 1.0
+    drawdown_pct = max(0.0, (initial_bankroll - current_bankroll) / initial_bankroll * 100)
+    multiplier = 1.0
+    for tier in sorted(tiers, key=lambda t: t["drawdown_pct"]):
+        if drawdown_pct >= tier["drawdown_pct"]:
+            multiplier = float(tier["unit_multiplier"])
+    return multiplier
+
+
+def _market_family_key(market_type: str) -> str:
+    """Map a raw market label to a canonical family for exposure tracking."""
+    raw = market_type.lower().strip()
+    if any(x in raw for x in ["1x2", "money line", "moneyline", "ml", "home win", "match result"]):
+        return "moneyline"
+    if any(x in raw for x in ["btts", "both teams"]):
+        return "btts"
+    if any(x in raw for x in ["over", "under", "o/u", "total"]):
+        return "totals"
+    if any(x in raw for x in ["asian", "handicap", "ah"]):
+        return "handicap"
+    return "other"
 
 
 def run_bankroll_session(
@@ -191,8 +269,11 @@ def run_bankroll_session(
     Returns a BankrollSession with fully sized bets.
     """
     session = BankrollSession()
-    session.bankroll_inr = get_current_bankroll(results_path)
+    session.bankroll_inr = get_current_bankroll(results_path, starting_bankroll=config.total_inr)
     session.effective_unit_inr = config.unit_inr
+    cold_start_active, completed_results, policy = _get_cold_start_policy_state(config, results_path)
+    session.cold_start_active = cold_start_active
+    session.completed_results_count = completed_results
 
     # --- Stop-loss check ---
     if session.bankroll_inr <= config.stop_loss_inr:
@@ -221,19 +302,42 @@ def run_bankroll_session(
             streak_count, config.losing_streak_window_days, session.effective_unit_inr
         )
 
+    # --- Drawdown governor (Phase 3) ---
+    opt = config.optimizer_cfg if isinstance(config.optimizer_cfg, dict) else {}
+    gov_cfg = opt.get("drawdown_governor", {})
+    if isinstance(gov_cfg, dict) and gov_cfg.get("enabled") and gov_cfg.get("tiers"):
+        dd_multiplier = _compute_drawdown_multiplier(
+            current_bankroll=session.bankroll_inr,
+            initial_bankroll=config.total_inr,
+            tiers=gov_cfg["tiers"],
+        )
+        if dd_multiplier < 1.0:
+            session.effective_unit_inr = round(session.effective_unit_inr * dd_multiplier, 2)
+            logger.warning(
+                "Drawdown governor active (bankroll %.2f / %.2f INR). "
+                "Unit multiplier %.2f → effective unit %.2f INR.",
+                session.bankroll_inr, config.total_inr,
+                dd_multiplier, session.effective_unit_inr,
+            )
+
     unit = session.effective_unit_inr
 
     # --- Size each bet ---
     sized = []
     for i, b in enumerate(filtered_bets, start=1):
-        stake, fraction = assign_stake(
-            decimal_odds=b["decimal_odds"],
-            true_probability=b["true_probability"],
-            confidence=b["confidence"],
-            bankroll_inr=session.bankroll_inr,
-            unit_inr=unit,
-            config=config,
-        )
+        if cold_start_active:
+            fraction = kelly_criterion(b["decimal_odds"], b["true_probability"])
+            flat_stake = float(policy.get("cold_start_flat_stake_inr", unit))
+            stake = max(unit, flat_stake)
+        else:
+            stake, fraction = assign_stake(
+                decimal_odds=b["decimal_odds"],
+                true_probability=b["true_probability"],
+                confidence=b["confidence"],
+                bankroll_inr=session.bankroll_inr,
+                unit_inr=unit,
+                config=config,
+            )
         sized.append(SizedBet(
             match_name=b["match_name"],
             market_type=b["market_type"],
@@ -248,6 +352,9 @@ def run_bankroll_session(
             stake_inr=stake,
             tag=b.get("tag", "SINGLE_CANDIDATE"),
             bet_id=f"BL-{date.today().strftime('%Y%m%d')}-{i:03d}",
+            prob_source=b.get("prob_source", "prior"),
+            prob_sample_count=b.get("prob_sample_count", 0),
+            ev_label=b.get("ev_label", "marginal"),
         ))
 
     # --- Sort: EV desc, then confidence desc as tiebreaker ---
@@ -256,21 +363,79 @@ def run_bankroll_session(
         reverse=True,
     )
 
-    # --- Enforce daily cap ---
+    # --- Optimizer allocation pass (Phase 3) ---
+    # Tracks running exposure by team (selection), market family, and confidence band.
+    # Falls back to daily-cap-only behaviour when optimizer is disabled.
     selected = []
     running_total = 0.0
     cap = config.max_daily_stake_inr
+    if cold_start_active:
+        cap = min(cap, float(policy.get("cold_start_max_total_exposure_inr", cap)))
+
+    optimizer_enabled = isinstance(opt, dict) and opt.get("enabled", False)
+    team_exposure: dict[str, float] = {}
+    market_exposure: dict[str, float] = {}
+    confidence_exposure: dict[str, float] = {}
+
+    max_team = float(opt.get("max_exposure_per_team_inr", float("inf"))) if optimizer_enabled else float("inf")
+    max_market = float(opt.get("max_exposure_per_market_inr", float("inf"))) if optimizer_enabled else float("inf")
+    conf_caps: dict = opt.get("max_exposure_per_confidence", {}) if optimizer_enabled else {}
 
     for bet in sized:
-        if running_total + bet.stake_inr <= cap:
-            selected.append(bet)
-            running_total += bet.stake_inr
-        else:
+        # Hard outer constraint: daily cap
+        if running_total + bet.stake_inr > cap:
             session.cap_hit = True
-            logger.info(
-                "Cap hit: dropped '%s' (stake %.0f would exceed %.0f limit).",
-                bet.selection, bet.stake_inr, cap
+            reason = (
+                f"daily_cap: adding ₹{bet.stake_inr:.0f} would exceed "
+                f"₹{cap:.0f} daily limit (running total ₹{running_total:.0f})"
             )
+            session.rejected_bets.append({"match_name": bet.match_name, "selection": bet.selection, "reason": reason})
+            logger.info("Cap hit: dropped '%s' — %s.", bet.selection, reason)
+            continue
+
+        if optimizer_enabled:
+            team_key = bet.selection
+            market_key = _market_family_key(bet.market_type)
+            conf_key = bet.confidence.lower()
+            max_conf = float(conf_caps.get(conf_key, float("inf")))
+
+            # Per-team exposure check
+            if team_exposure.get(team_key, 0.0) + bet.stake_inr > max_team:
+                reason = (
+                    f"team_exposure: '{team_key}' running ₹{team_exposure.get(team_key, 0):.0f} "
+                    f"+ ₹{bet.stake_inr:.0f} would exceed ₹{max_team:.0f} team cap"
+                )
+                session.rejected_bets.append({"match_name": bet.match_name, "selection": bet.selection, "reason": reason})
+                logger.info("Optimizer: dropped '%s' — %s.", bet.selection, reason)
+                continue
+
+            # Per-market exposure check
+            if market_exposure.get(market_key, 0.0) + bet.stake_inr > max_market:
+                reason = (
+                    f"market_exposure: '{market_key}' running ₹{market_exposure.get(market_key, 0):.0f} "
+                    f"+ ₹{bet.stake_inr:.0f} would exceed ₹{max_market:.0f} market cap"
+                )
+                session.rejected_bets.append({"match_name": bet.match_name, "selection": bet.selection, "reason": reason})
+                logger.info("Optimizer: dropped '%s' — %s.", bet.selection, reason)
+                continue
+
+            # Per-confidence exposure check
+            if confidence_exposure.get(conf_key, 0.0) + bet.stake_inr > max_conf:
+                reason = (
+                    f"confidence_cap: '{conf_key}' running ₹{confidence_exposure.get(conf_key, 0):.0f} "
+                    f"+ ₹{bet.stake_inr:.0f} would exceed ₹{max_conf:.0f} confidence cap"
+                )
+                session.rejected_bets.append({"match_name": bet.match_name, "selection": bet.selection, "reason": reason})
+                logger.info("Optimizer: dropped '%s' — %s.", bet.selection, reason)
+                continue
+
+            # All checks passed — update trackers
+            team_exposure[team_key] = team_exposure.get(team_key, 0.0) + bet.stake_inr
+            market_exposure[market_key] = market_exposure.get(market_key, 0.0) + bet.stake_inr
+            confidence_exposure[conf_key] = confidence_exposure.get(conf_key, 0.0) + bet.stake_inr
+
+        selected.append(bet)
+        running_total += bet.stake_inr
 
     session.sized_bets = selected
     session.total_stake_inr = running_total

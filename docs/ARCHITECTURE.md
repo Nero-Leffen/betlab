@@ -10,7 +10,7 @@ Think of it as a **bet filter + portfolio manager**: you feed in tips and odds, 
 
 ## System Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                         BetLab 5-Phase Pipeline                            │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -65,7 +65,7 @@ Think of it as a **bet filter + portfolio manager**: you feed in tips and odds, 
 ## Key Design Principles
 
 | Principle | Why It Matters |
-|-----------|---|
+| --- | --- |
 | **Transparency** 📊 | Every calculation is visible. No black boxes. EV, Kelly %, hit probability—all shown in output. Users understand *why* a bet is recommended. |
 | **Local-First** 🏠 | No cloud, no external API dependencies (except Streamlit for UI). All data stays on your machine. No betting syndicate profiling. |
 | **Risk Management** 🛡️ | Hard-coded stop-loss, daily caps, streak detection. Designed to prevent catastrophic losses and emotional chasing. |
@@ -77,7 +77,7 @@ Think of it as a **bet filter + portfolio manager**: you feed in tips and odds, 
 ## Module Overview
 
 | Module | Responsibility | Input | Output |
-|--------|---|---|---|
+| --- | --- | --- | --- |
 | **parser.py** | Parse bets.txt (pipe-delimited) into structured objects. Handle all odds formats (decimal, American, fractional). | Raw text lines | `BetInput` objects + error log |
 | **math_engine.py** | Pure math: odds conversion, EV calculation, Kelly Criterion, parlay hit probability. | Odds strings, probabilities | Decimal odds, EV %, Kelly fractions |
 | **analyser.py** | Filter bets by EV threshold. Tag as `SINGLE_CANDIDATE` or `PARLAY_CANDIDATE`. | Parsed bets, source accuracy, min EV | Filtered bets with tags |
@@ -92,42 +92,49 @@ Think of it as a **bet filter + portfolio manager**: you feed in tips and odds, 
 **Input:** `"Man City vs Arsenal | 1X2 | Man City | 1.85 | High"`
 
 **Phase 1 — Parser:**
+
 - Parse line: `match="Man City vs Arsenal"`, `selection="Man City"`, `odds_str="1.85"`, `confidence="high"`
 - Detect odds format: `"1.85"` → decimal
 - Create `BetInput(decimal_odds=1.85, confidence="high", ...)`
 
 **Phase 2 — Analyser:**
+
 - Source accuracy (football): 53% (from config)
 - Implied probability: `1 / 1.85 = 0.5405` (54%)
 - Expected Value: `(1.85 × 0.53) − 1 = 0.981 − 1 = −0.019` ✗ (−1.9% EV)
 - **Result:** Filtered out (below 2% threshold)
 
 **Alternative Scenario** (if EV ≥ 2%):
+
 - Tag: `SINGLE_CANDIDATE` (+ maybe `PARLAY_CANDIDATE` if top 4)
-- Expected stake (high confidence): `2 units = ₹50`
+- Cold-start stake on first run: `1 unit = ₹25`
+- Adaptive stake after cold-start: confidence and Kelly logic can increase this
 
 **Phase 3 — Bankroll Manager:**
+
 - Half-Kelly fraction: `0.35 × 0.5 = 0.175` (17.5% of bankroll)
-- Bankroll: ₹500 → Half-Kelly stake: `₹87.50`
-- Confidence multiplier (high): ×2 → `₹50`
-- Daily cap check: Cumulative ₹50 < ₹200 ✓
-- **Final stake: ₹50**
+- Bankroll: ₹800 → Half-Kelly reference stake: `₹140.00`
+- Cold-start mode currently overrides this to flat `₹25` stakes until enough settled history exists
+- Daily cap check: Cumulative stake must remain under the active session cap ✓
+- **First-run stake: ₹25**
 
 **Phase 4 — Parlay Builder:**
+
 - If `PARLAY_CANDIDATE`: eligible for 2–4 leg parlays
 - Correlation check with other bets: no conflicts
-- Add to parlay pool
+- In cold-start mode, parlays may be reduced or suppressed to stay within the tighter exposure cap
 
 **Phase 5 — Output:**
-- Recommendation: *"Bet ₹50 on Man City @ 1.85 (High confidence, +1.9% EV)"*
-- CSV row: `["bet_001", "Man City vs Arsenal", "Man City", "1.85", "0.53", "0.019", "high", "50", "SINGLE_CANDIDATE", "pending"]`
+
+- Recommendation: *"Bet ₹25 on Man City @ 1.85 (cold-start mode, +1.9% EV)"*
+- CSV row: `["bet_001", "Man City vs Arsenal", "Man City", "1.85", "0.53", "0.019", "high", "25", "SINGLE_CANDIDATE", "pending"]`
 
 ---
 
 ## Technology Stack
 
 | Layer | Technologies |
-|-------|---|
+| --- | --- |
 | **UI/Frontend** | Streamlit (web interface) |
 | **Backend Logic** | Python 3.8+ (dataclasses, pathlib, logging) |
 | **Configuration** | YAML (settings.yaml) |
@@ -141,7 +148,7 @@ Think of it as a **bet filter + portfolio manager**: you feed in tips and odds, 
 
 ## File Structure
 
-```
+```text
 betlab/
 ├── config/
 │   └── settings.yaml              # Bankroll, units, source accuracy, thresholds
@@ -189,9 +196,15 @@ All runtime parameters live in `config/settings.yaml`:
 
 ```yaml
 bankroll:
-  total_inr: 500                    # Current bankroll (max ₹500 in beta)
+  total_inr: 800                    # Current bankroll baseline
   unit_inr: 25                      # 1 unit = ₹25
   max_daily_stake_inr: 200          # 4 units/day max
+
+bankroll_policy:
+  mode: cold_start
+  cold_start_min_settled_bets: 20
+  cold_start_flat_stake_inr: 25
+  cold_start_max_total_exposure_inr: 75
 
 strategy:
   min_ev_threshold: 0.02            # 2% minimum edge (configurable)
@@ -217,7 +230,7 @@ The Streamlit UI allows **session-only overrides** of these values without modif
 ## Key Formulas Reference
 
 | Formula | Equation | Use Case |
-|---------|----------|----------|
+| --- | --- | --- |
 | **Decimal Odds** | Decimal / American / Fractional input → `decimal` | Standardization |
 | **Implied Probability** | `1 / decimal_odds` | Market expectation |
 | **Expected Value** | `(decimal_odds × true_prob) − 1` | Bet quality metric |

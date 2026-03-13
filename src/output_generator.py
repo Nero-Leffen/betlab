@@ -98,6 +98,14 @@ def generate_recommendations(
             "",
         ]
 
+    if session.cold_start_active:
+        lines += [
+            "## 🧪 Cold-Start Bankroll Mode",
+            f"> Only **{session.completed_results_count} completed results** are available, so BetLab is using flat ₹{session.effective_unit_inr:.0f} stakes.",
+            "> Kelly is still shown for reference, but first-run bankroll management remains fixed-stake and capped.",
+            "",
+        ]
+
     if session.cap_hit:
         lines += [
             "## ℹ️ Daily Cap Note",
@@ -149,12 +157,16 @@ def generate_recommendations(
                 f"- **Match:** {b.match_name} ({b.market_type})",
                 f"- **EV:** {_ev_pct(b.ev)} — Passes the 2% minimum edge threshold.",
                 f"- **True Probability Used:** {_prob_pct(b.true_probability)} "
-                  f"(source accuracy for {b.sport})",
+                  f"(source: {b.prob_source}"
+                  + (f", n≈{b.prob_sample_count}" if b.prob_source == "calibrated" else "")
+                  + ")",
                 f"- **Implied Probability:** {_prob_pct(b.implied_probability)} "
                   f"(bookmaker's break-even)",
-                f"- **Kelly Fraction:** {_ev_pct(b.kelly_fraction)} of bankroll → "
-                  f"rounded to ₹{b.stake_inr:.0f} INR ({int(b.stake_inr / session.effective_unit_inr)} unit(s))",
+                                f"- **Kelly Fraction:** {_ev_pct(b.kelly_fraction)} of bankroll"
+                                    + (" (reference only in cold-start mode)" if session.cold_start_active else "")
+                                    + f" → rounded to ₹{b.stake_inr:.0f} INR ({int(b.stake_inr / session.effective_unit_inr)} unit(s))",
                 f"- **Risk Level:** {b.confidence.title()} confidence",
+                f"- **EV Quality:** {b.ev_label.upper()}",
                 "",
             ]
 
@@ -179,11 +191,15 @@ def generate_recommendations(
                 f"| Metric | Value |",
                 f"|--------|-------|",
                 f"| Combined Odds | {p.combined_odds:.2f} |",
+                                f"| Base Hit Probability | {_prob_pct(p.base_hit_probability)} |",
+                                f"| Correlation Penalty Factor | {p.penalty_factor:.3f} |",
                 f"| Hit Probability | {_prob_pct(p.hit_probability)} |",
                 f"| Parlay EV | {_ev_pct(p.parlay_ev)} |",
                 f"| Stake | ₹{p.stake_inr:.0f} INR (1 unit) |",
                 "",
-                f"> 💡 Hit probability is {_prob_pct(p.hit_probability)}. "
+                                f"> 💡 Base hit probability {_prob_pct(p.base_hit_probability)} adjusted by "
+                                    f"penalty factor {p.penalty_factor:.3f} gives final hit probability "
+                                    f"{_prob_pct(p.hit_probability)}. "
                   f"At combined odds of {p.combined_odds:.2f}, this is a high-variance play.",
                 "",
             ]

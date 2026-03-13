@@ -46,6 +46,65 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+def _load_parlay_correlation_settings(config_path: str = "config/settings.yaml") -> dict:
+    """Load optional parlay correlation settings from YAML with safe fallbacks."""
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        strategy = cfg.get("strategy", {}) if isinstance(cfg, dict) else {}
+        settings = strategy.get("parlay_correlation", {}) if isinstance(strategy, dict) else {}
+        return settings if isinstance(settings, dict) else {}
+    except Exception as e:
+        logger.warning("Could not load parlay correlation settings: %s", e)
+        return {}
+
+
+def _load_analysis_config(config_path: str = "config/settings.yaml") -> tuple[dict, dict, dict, dict]:
+    """Load analysis-related config blocks from YAML."""
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        strategy = cfg.get("strategy", {}) if isinstance(cfg, dict) else {}
+        market_priors = cfg.get("market_priors", {}) if isinstance(cfg, dict) else {}
+        calibration = cfg.get("calibration", {}) if isinstance(cfg, dict) else {}
+        ev_robustness = cfg.get("ev_robustness", {}) if isinstance(cfg, dict) else {}
+        return (
+            strategy if isinstance(strategy, dict) else {},
+            market_priors if isinstance(market_priors, dict) else {},
+            calibration if isinstance(calibration, dict) else {},
+            ev_robustness if isinstance(ev_robustness, dict) else {},
+        )
+    except Exception as e:
+        logger.warning("Could not load analysis config: %s", e)
+        return {}, {}, {}, {}
+
+
+def _load_results_df(results_path: str = "data/results.csv"):
+    """Load results.csv into a DataFrame, or return None if unavailable."""
+    import pandas as pd
+    from pathlib import Path
+    p = Path(results_path)
+    if not p.exists():
+        return None
+    try:
+        return pd.read_csv(p)
+    except Exception as e:
+        logger.warning("Could not load results.csv for calibration: %s", e)
+        return None
+
+
+def _get_parlay_limit_for_session(config, session, strategy_cfg: dict) -> int:
+    """Return the max parlay options allowed for this session."""
+    max_options = int(strategy_cfg.get("parlay_max_options", 2))
+    policy = config.policy_cfg if isinstance(config.policy_cfg, dict) else {}
+    if session.cold_start_active:
+        max_options = min(max_options, int(policy.get("cold_start_max_parlay_options", 1)))
+        max_exposure = float(policy.get("cold_start_max_total_exposure_inr", config.max_daily_stake_inr))
+        if session.total_stake_inr + session.effective_unit_inr > max_exposure:
+            return 0
+    return max_options
+
 # ── Page Config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="BetLab Analytics",
@@ -61,7 +120,7 @@ DISCLAIMER_SHORT = (
 )
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
-def render_sidebar() -> dict:
+def render_sidebar(config) -> dict:
     """Render sidebar controls. Returns runtime overrides."""
     st.sidebar.title("⚙️ BetLab Settings")
     st.sidebar.caption("Overrides apply to this session only.")
@@ -70,9 +129,12 @@ def render_sidebar() -> dict:
     st.sidebar.subheader("💰 Bankroll")
 
     bankroll_override = st.sidebar.number_input(
-        "Current Bankroll (₹ INR)", min_value=0, max_value=500,
-        value=500, step=25,
-        help="Set to your actual current bankroll. Max 500 INR per spec."
+        "Current Bankroll (₹ INR)",
+        min_value=0,
+        max_value=max(int(config.total_inr * 5), 5000),
+        value=int(config.total_inr),
+        step=25,
+        help="Set to your actual current bankroll for this session."
     )
 
     st.sidebar.markdown("---")
@@ -120,14 +182,14 @@ def main():
     st.caption("Educational tool for systematic bankroll management. v1.0.0")
     st.info(DISCLAIMER_SHORT)
 
-    overrides = render_sidebar()
-
     # Load base config
     try:
         config = load_config("config/settings.yaml")
     except FileNotFoundError:
         st.error("❌ config/settings.yaml not found. Please run from the /betlab project root.")
         return
+
+    overrides = render_sidebar(config)
 
     # Apply sidebar overrides
     config.total_inr = overrides["bankroll_override"]
@@ -151,11 +213,13 @@ def main():
         )
 
         bets_text = ""
+        uploaded = None
 
         if input_method == "Upload bets.txt":
-            uploaded = st.file_uploader("Upload bets.txt", type=["txt", "csv"])
+            uploaded = st.file_uploader("Upload bets file", type=["txt", "csv", "xlsx", "xls"])
             if uploaded:
-                bets_text = uploaded.read().decode("utf-8")
+                if uploaded.name.lower().endswith((".txt", ".csv")):
+                    bets_text = uploaded.read().decode("utf-8")
         else:
             bets_text = st.text_area(
                 "Paste your bets (one per line)",
@@ -166,9 +230,12 @@ def main():
         st.caption("Format: `Match Name | Market | Selection | Odds | [Confidence]`")
         st.caption("Odds accepted: Decimal (1.85), American (+150 / -110), Fractional (5/2)")
 
-        if st.button("🚀 Run Analysis", type="primary", disabled=not bets_text.strip()):
+        can_run = (uploaded is not None) if input_method == "Upload bets.txt" else bool(bets_text.strip())
+
+        if st.button("🚀 Run Analysis", type="primary", disabled=not can_run):
             run_analysis(
                 bets_text=bets_text,
+                uploaded_file=uploaded,
                 config=config,
                 accuracy_map=accuracy_map,
                 overrides=overrides,
@@ -224,16 +291,21 @@ def main():
                 st.info("Need at least 5 WIN/LOSS results to recalibrate accuracy.")
 
 
-def run_analysis(bets_text, config, accuracy_map, overrides):
+def run_analysis(bets_text, uploaded_file, config, accuracy_map, overrides):
     """Execute the full 5-phase pipeline and render results."""
 
-    # Write temp bets file
-    temp_path = Path("data/bets.txt")
-    temp_path.parent.mkdir(parents=True, exist_ok=True)
+    Path("data").mkdir(parents=True, exist_ok=True)
     Path("data/logs").mkdir(parents=True, exist_ok=True)
-    temp_path.write_text(bets_text, encoding="utf-8")
 
     with st.spinner("Running analysis pipeline..."):
+        if uploaded_file is not None:
+            upload_dir = Path("data/uploads")
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            temp_path = upload_dir / uploaded_file.name
+            temp_path.write_bytes(uploaded_file.getbuffer())
+        else:
+            temp_path = Path("data/bets.txt")
+            temp_path.write_text(bets_text, encoding="utf-8")
 
         # Phase 1: Parse
         parse_result = parse_bets_file(temp_path)
@@ -248,13 +320,32 @@ def run_analysis(bets_text, config, accuracy_map, overrides):
             return
 
         st.success(f"✅ Parsed **{len(parse_result.bets)}** valid bets.")
+        if parse_result.prebuilt_parlays:
+            st.info(f"🧩 Imported **{len(parse_result.prebuilt_parlays)}** prebuilt parlay(s) from worksheet.")
+            with st.expander("View imported prebuilt parlays", expanded=False):
+                import pandas as pd
+                rows = []
+                for p in parse_result.prebuilt_parlays:
+                    rows.append({
+                        "Parlay Name": p.get("parlay_name", ""),
+                        "Legs": p.get("legs", ""),
+                        "Multiplier": p.get("multiplier_raw", ""),
+                        "Legs Included": p.get("legs_included", ""),
+                    })
+                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-        # Phase 2: Analyse
+        # Phase 2: Analyse (with optional calibration)
+        strategy_cfg, market_priors, calibration_cfg, robustness_cfg = _load_analysis_config()
+        results_df = _load_results_df()
         filtered = analyse_bets(
             bets=parse_result.bets,
             accuracy_map=accuracy_map,
             min_ev_threshold=overrides["min_ev"],
             parlay_pool_size=overrides["parlay_pool"],
+            market_priors=market_priors or None,
+            results_df=results_df,
+            calibration_cfg=calibration_cfg or None,
+            robustness_cfg=robustness_cfg or None,
         )
 
         if not filtered:
@@ -282,12 +373,21 @@ def run_analysis(bets_text, config, accuracy_map, overrides):
                 f"Unit reduced to ₹{session.effective_unit_inr:.0f} INR."
             )
 
+        if session.cold_start_active:
+            st.info(
+                f"🧪 Cold-start bankroll mode active. Using flat ₹{session.effective_unit_inr:.0f} stakes "
+                f"until {config.policy_cfg.get('cold_start_min_settled_bets', 20)} completed results are logged."
+            )
+
         # Phase 4: Parlays
+        correlation_settings = _load_parlay_correlation_settings()
+        session_parlay_max_options = _get_parlay_limit_for_session(config, session, strategy_cfg)
         parlays = build_parlays(
             sized_bets=session.sized_bets,
             parlay_stake_inr=session.effective_unit_inr,
             max_legs=overrides["parlay_max_legs"],
-            max_options=2,
+            max_options=session_parlay_max_options,
+            correlation_settings=correlation_settings,
         )
 
         # Phase 5: Render + Output

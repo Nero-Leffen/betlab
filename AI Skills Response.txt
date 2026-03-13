@@ -1,0 +1,50 @@
+Core AI Skills You Want Copilot To Apply
+
+Requirements breakdown into small weekly deliverables.
+Codebase architecture mapping and dependency tracing.
+Bug reproduction and root-cause analysis.
+Test-first feature development for critical logic.
+Refactoring for readability without behavior regression.
+Data parsing and normalization strategy design.
+Probability and risk-model reasoning.
+Performance and edge-case analysis.
+Release readiness checks with acceptance criteria.
+Developer documentation and changelog writing.
+Copilot Capabilities To Use Heavily In VS Code
+
+Agent mode for multi-step implementation and validation.
+Workspace semantic search for finding related logic quickly.
+Symbol usage search for safe cross-file changes.
+Precise code edits with patch-based updates.
+Terminal execution for install, test, run, and smoke checks.
+Problem diagnostics for lint and compile/runtime errors.
+Test execution and failure triage loops.
+Notebook support for quick model experiments.
+Git diff awareness for safe incremental changes.
+Persistent memory for preferences, plans, and lessons learned.
+Project-Specific AI Work Modes For BetLab
+
+Parser hardening mode.
+EV and calibration model mode.
+Parlay correlation modeling mode.
+Bankroll optimization and exposure-control mode.
+Explainability/report-generation mode.
+Regression guardrail testing mode.
+Recommended Dev Tooling Around Copilot
+
+Python extension.
+Pylance for type-aware edits and symbol intelligence.
+Pytest for fast feedback loops.
+Ruff or Flake8 for lint quality.
+Black for formatting consistency.
+GitHub Pull Requests extension for review flow.
+Markdown linting for plan/docs quality.
+Optional: Jupyter for model sandboxing.
+AI-First Workflow You Can Reuse Daily
+
+Ask Copilot to restate goal and acceptance criteria.
+Ask it to locate files and affected symbols.
+Implement smallest vertical slice.
+Run tests and a real data smoke case.
+Review diff and update docs/plan.
+Commit only when behavior and tests are verified.

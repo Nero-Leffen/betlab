@@ -5,9 +5,11 @@ This directory contains Mermaid diagrams that visualize the BetLab system archit
 ## Diagram Files
 
 ### 1. `data_flow.mmd` - End-to-End Pipeline Visualization
+
 **Purpose:** Shows the complete data flow through the BetLab system
 
 **Visualizes:**
+
 - Input source (bets.txt)
 - 5 pipeline phases:
   1. **Parse** (parser.py) - Normalize match info and odds
@@ -19,6 +21,7 @@ This directory contains Mermaid diagrams that visualize the BetLab system archit
 - Error handling path (rejected bets → error_log.txt)
 
 **Color Coding:**
+
 - Light Blue: Input data
 - Green: Valid outputs
 - Orange: Errors and rejections
@@ -28,9 +31,11 @@ This directory contains Mermaid diagrams that visualize the BetLab system archit
 ---
 
 ### 2. `module_dependencies.mmd` - Module Dependency Graph
+
 **Purpose:** Shows which modules depend on which other modules
 
 **Visualizes:**
+
 - Independent modules:
   - parser.py (primary input handler)
   - math_engine.py (pure mathematical functions)
@@ -41,6 +46,7 @@ This directory contains Mermaid diagrams that visualize the BetLab system archit
   - output_generator.py (depends on all other modules)
 
 **Color Coding:**
+
 - Orange: Independent modules (no dependencies)
 - Light Blue: Processing modules
 - Green: Calculation modules
@@ -52,9 +58,11 @@ This directory contains Mermaid diagrams that visualize the BetLab system archit
 ---
 
 ### 3. `pipeline_walkthrough.mmd` - Sequence Diagram
+
 **Purpose:** Shows a single bet's journey through the entire system with actual data values
 
 **Visualizes:**
+
 - Example: User enters "Man City 1.85"
 - Step-by-step processing:
   1. Parser normalizes the odds to decimal format (1.85)
@@ -72,13 +80,16 @@ This directory contains Mermaid diagrams that visualize the BetLab system archit
 ## Viewing Options
 
 ### Option 1: GitHub (Recommended)
+
 If this repository is on GitHub, Mermaid diagrams render automatically in the repository viewer. Simply navigate to the diagram files and they will display as visual graphics.
 
 **Pros:** No installation needed, renders in web browser
 **Cons:** Requires GitHub access
 
 ### Option 2: VSCode with Mermaid Preview Extension
+
 Install the "Markdown Preview Mermaid Support" extension for VSCode:
+
 1. Open VSCode Extensions (Ctrl+Shift+X)
 2. Search for "Mermaid"
 3. Install "Markdown Preview Mermaid Support" (by Matt Bierner)
@@ -89,7 +100,8 @@ Install the "Markdown Preview Mermaid Support" extension for VSCode:
 **Cons:** Requires extension installation
 
 ### Option 3: Online Mermaid Editor
-Use the official Mermaid Live Editor: https://mermaid.live
+
+Use the official Mermaid Live Editor: <https://mermaid.live>
 
 1. Copy the entire content of a .mmd file
 2. Paste into the editor
@@ -99,6 +111,7 @@ Use the official Mermaid Live Editor: https://mermaid.live
 **Cons:** Requires internet, may slow with large diagrams
 
 ### Option 4: Command Line Rendering
+
 Install mermaid-cli for local rendering to PNG/SVG:
 
 ```bash
@@ -120,7 +133,7 @@ mmdc -i module_dependencies.mmd -o module_dependencies.svg
 ## Diagram Quick Reference
 
 | Diagram | Type | Best For | Key Insight |
-|---------|------|----------|------------|
+| --- | --- | --- | --- |
 | data_flow.mmd | Flowchart | Portfolio/stakeholders | "5 phases → 2 outputs + error handling" |
 | module_dependencies.mmd | Graph | Code architects | "2 independent cores, 4 dependent modules" |
 | pipeline_walkthrough.mmd | Sequence | Technical training | "Shows values at each calculation step" |
@@ -142,7 +155,7 @@ These diagrams complement the following documentation files:
 When the system changes:
 
 1. Update the relevant .mmd file with new logic
-2. Test syntax using Mermaid Live Editor: https://mermaid.live
+2. Test syntax using Mermaid Live Editor: <https://mermaid.live>
 3. Commit changes with message describing what changed
 4. The diagrams will auto-update in GitHub, VSCode, and online viewers
 
@@ -151,6 +164,7 @@ When the system changes:
 ## File Format
 
 All diagrams use Mermaid syntax (.mmd extension). Mermaid is:
+
 - **Markdown-based** - Human readable source code
 - **Plain text** - Version control friendly
 - **Syntax simple** - No special tools needed to edit
@@ -161,15 +175,18 @@ All diagrams use Mermaid syntax (.mmd extension). Mermaid is:
 ## Troubleshooting
 
 ### "Diagram won't render in GitHub"
+
 - GitHub supports Mermaid natively, but may cache old versions
 - Clear browser cache (Ctrl+Shift+Delete) and refresh
 
 ### "Diagram looks wrong in VSCode"
+
 - Ensure "Markdown Preview Mermaid Support" extension is installed
 - Reload VSCode (Ctrl+Shift+P → "Reload Window")
 - Check for syntax errors using Mermaid Live Editor
 
 ### "Can't run mermaid-cli"
+
 - Ensure Node.js is installed: `node --version`
 - Reinstall mmdc: `npm install -g @mermaid-js/mermaid-cli`
 - On Windows, may need to restart terminal after installation

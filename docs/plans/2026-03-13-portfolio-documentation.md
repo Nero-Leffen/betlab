@@ -1125,7 +1125,7 @@ This module is the **risk guardian**: it prevents you from betting too much too 
 
 ```yaml
 bankroll:
-  total_inr: 500             # Total bankroll
+    total_inr: 800             # Total bankroll
   unit_inr: 25               # 1 unit = ₹25
   max_daily_stake_inr: 200   # 4 units per day
 
@@ -1261,7 +1261,7 @@ assert in_streak2 == False  # Streak over
 
 **Parameters:**
 - `current_pnl` (float): Current profit/loss in INR
-- `total_bankroll` (float): Starting bankroll (₹500)
+- `total_bankroll` (float): Starting bankroll (₹800)
 
 **Returns:**
 - `dict`: Status report
@@ -1777,7 +1777,7 @@ Sample structure:
 ```
 # 📊 BetLab Recommendations
 **Date:** Friday, 13 March 2026
-**Bankroll:** ₹500 INR
+**Bankroll:** ₹800 INR
 **Effective Unit:** ₹25 INR
 
 ## 📋 Session Summary
