@@ -111,6 +111,7 @@ New to BetLab? Start here:
 
 - **[System Architecture](docs/ARCHITECTURE.md)** — How BetLab works at 10,000 ft
 - **[Design Decisions](docs/DESIGN_DECISIONS.md)** — Why we chose Half-Kelly, correlation checks, local-first, etc.
+- **[Claude AI Setup](docs/CLAUDE_SETUP.md)** — How to connect this repo to Claude AI via GitHub Actions
 
 ### API Reference
 
